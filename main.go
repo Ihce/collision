@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,49 +17,31 @@ func hashFunction(input []byte) []byte {
 	return hasher.Sum(nil)
 }
 
-func bruteForce(targetHash []byte, numWorkers int) string {
-	var wg sync.WaitGroup
-	resultChan := make(chan string, 1)
-	var attempts uint64
+func bruteForce(ctx context.Context, targetHash []byte, rng *rand.Rand, attempts *uint64, resultChan chan<- []byte, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				randomInput := generateRandomString()
-				randomHash := hashFunction(randomInput)
-				atomic.AddUint64(&attempts, 1)
-				if comparePartialHash(randomHash, targetHash) {
-					select {
-					case resultChan <- string(randomInput):
-					default:
-					}
-					return
-				}
+	for {
+		select {
+		case <-ctx.Done():
+			// Stop if context is canceled
+			return
+		default:
+			atomic.AddUint64(attempts, 1)
+			randomInput := generateRandomString(rng)
+			randomHash := hashFunction(randomInput)
+			if comparePartialHash(randomHash, targetHash) {
+				resultChan <- randomInput
+				return
 			}
-		}()
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	go func() {
-		for {
-			fmt.Printf("\rAttempts: %d", atomic.LoadUint64(&attempts))
 		}
-	}()
-
-	return <-resultChan
+	}
 }
 
-func generateRandomString() []byte {
+func generateRandomString(rng *rand.Rand) []byte {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 8)
 	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+		b[i] = letters[rng.Intn(len(letters))]
 	}
 	return b
 }
@@ -66,7 +50,7 @@ func comparePartialHash(hash1, hash2 []byte) bool {
 	if len(hash1) < 8 || len(hash2) < 8 {
 		return false
 	}
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 4; i++ {
 		if hash1[i] != hash2[i] {
 			return false
 		}
@@ -75,16 +59,47 @@ func comparePartialHash(hash1, hash2 []byte) bool {
 }
 
 func main() {
+
 	input := "dbs0025@auburn.edu"
 	emailHash := hashFunction([]byte(input))
+	fmt.Printf("Email: %s\n", input)
 	fmt.Printf("EmailHash: %x\n", emailHash)
 
+	// Setup for parallel brute-force
 	numWorkers := 4
+	var attempts uint64
+	resultChan := make(chan []byte)
+	var wg sync.WaitGroup
 
+	// Create a cancelable context to stop all goroutines when one finds a match
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start timer
 	start := time.Now()
-	matchedString := bruteForce(emailHash, numWorkers)
+
+	// Launch worker goroutines
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		workerRng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(i))) // Each worker gets a unique seed
+		go bruteForce(ctx, emailHash, workerRng, &attempts, resultChan, &wg)
+	}
+
+	// Wait for a result from any goroutine
+	matchedInput := <-resultChan
+	cancel()  // Signal all workers to stop
+	wg.Wait() // Wait for all goroutines to finish
+
+	// End timer
 	elapsed := time.Since(start)
 
-	fmt.Printf("\nMatched String: %s\n", matchedString)
+	// Compute the hash of the matched input
+	matchedHash := hashFunction(matchedInput)
+
+	// Output result
+	fmt.Printf("\nMatched Input: %s\n", matchedInput)
+	fmt.Printf("Matched Hash: %x\n", matchedHash)
+	fmt.Printf("Attempts: %d\n", atomic.LoadUint64(&attempts))
 	fmt.Printf("Time taken: %s\n", elapsed)
+
+	os.Exit(0)
 }
