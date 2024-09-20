@@ -33,7 +33,6 @@ func bruteForce(ctx context.Context, input []byte, rng *rand.Rand, attempts *uin
 	for {
 		select {
 		case <-ctx.Done():
-			// Stop if context is canceled
 			return
 		default:
 			atomic.AddUint64(attempts, 1)
@@ -80,62 +79,54 @@ func main() {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 	input := []byte("dbs0025@auburn.edu")
 
-	// Setup for parallel brute-force
-	numWorkers := 1
+	numWorkers := 4
 	var attempts uint64
 	resultChan := make(chan [2]Result)
 	var wg sync.WaitGroup
 
-	// Create a cancelable context to stop all goroutines when one finds a match
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Start timer
-	start := time.Now()
+	// start := time.Now()
 
-	// Launch worker goroutines
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		workerRng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(i))) // Each worker gets a unique seed
 		go bruteForce(ctx, input, workerRng, &attempts, resultChan, &wg)
 	}
 
-	var tickerWg sync.WaitGroup
-	tickerWg.Add(1)
+	// var tickerWg sync.WaitGroup
+	// tickerWg.Add(1)
 
-	// Goroutine to print attempts per second every 10 seconds
-	go func() {
-		defer tickerWg.Done()
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				elapsed := time.Since(start).Seconds()
-				attemptsSoFar := atomic.LoadUint64(&attempts)
-				attemptsPerSecond := float64(attemptsSoFar) / elapsed
-				fmt.Fprintf(os.Stderr, "\rAttempts per second: %.2f", attemptsPerSecond)
-			case <-ctx.Done():
-				fmt.Fprintln(os.Stderr, "")
-				return
-			}
-		}
-	}()
-	// Wait for a result from any goroutine
+	// go func() {
+	// 	defer tickerWg.Done()
+	// 	ticker := time.NewTicker(1 * time.Second)
+	// 	defer ticker.Stop()
+	// 	for {
+	// 		select {
+	// 		case <-ticker.C:
+	// 			elapsed := time.Since(start).Seconds()
+	// 			attemptsSoFar := atomic.LoadUint64(&attempts)
+	// 			attemptsPerSecond := float64(attemptsSoFar) / elapsed
+	// 			fmt.Fprintf(os.Stderr, "\rAttempts per second: %.2f", attemptsPerSecond)
+	// 		case <-ctx.Done():
+	// 			fmt.Fprintln(os.Stderr, "")
+	// 			return
+	// 		}
+	// 	}
+	// }()
+
 	matchedResults := <-resultChan
-	cancel()  // Signal all workers to stop
-	wg.Wait() // Wait for all goroutines to finish
+	cancel()
+	wg.Wait()
 
-	// End timer
-	elapsed := time.Since(start)
-
-	// Output result
+	// elapsed := time.Since(start)
 
 	for index, result := range matchedResults {
 		fmt.Printf("INPUT %d -- %s\n", index+1, base64.StdEncoding.EncodeToString(result.Input))
 		// fmt.Printf("Digest %d -- %x\n", index, result.Hash)
 	}
-	fmt.Fprintf(os.Stderr, "Attempts: %d\n", atomic.LoadUint64(&attempts))
-	fmt.Fprintf(os.Stderr, "Time taken: %s\n", elapsed)
+	// fmt.Fprintf(os.Stderr, "Attempts: %d\n", atomic.LoadUint64(&attempts))
+	// fmt.Fprintf(os.Stderr, "Time taken: %s\n", elapsed)
 
 	os.Exit(0)
 }
