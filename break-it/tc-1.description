@@ -1,0 +1,1 @@
+The issue in this testcase is that the nosj_parser does not handle empty maps. It tries to split the key-value pair, but since it empties it crashes the program. I would recommend checking for empty maps in the _parse_map() function and writing out "begin-map\nend-map\n".

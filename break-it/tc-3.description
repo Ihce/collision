@@ -1,0 +1,1 @@
+The issue with this testcase is that values that are maps should ignore whitespace before and after the map. This nosj_parser does not handle that situation and instead returns it as an error. To fix this just strip the white space before and after the map structure and parse it as normal.
